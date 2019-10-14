@@ -19,8 +19,8 @@
 #define DYPLO_NODE_CAMERA_0	2
 #define DYPLO_NODE_CAMERA_1	3
 
-static const unsigned int video_size_pixels = 720 * 480;
-static const unsigned int video_bytes_per_pixel = 3; /* RGB */
+static const unsigned int video_size_pixels = 1920 * 1080;
+static const unsigned int video_bytes_per_pixel = 4; /* RGBX */
 static const unsigned int video_size_bytes = video_size_pixels * video_bytes_per_pixel;
 
 static void fcntl_set_flag(int handle, long flag)
