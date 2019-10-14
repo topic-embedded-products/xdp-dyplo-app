@@ -38,6 +38,7 @@ int main(int argc, char** argv)
 	unsigned int frames_sent = 0;
 	unsigned int frames_dropped = 0;
 	unsigned int frames_incomplete = 0;
+	int main_result = 0;
 
 	try
 	{
@@ -157,14 +158,14 @@ int main(int argc, char** argv)
 	catch (const std::exception& ex)
 	{
 		std::cerr << "ERROR:\n" << ex.what() << std::endl;
-		return 1;
+		main_result = 1;
 	}
 
-		std::cerr << "Frames: " << frames_captured <<
-			" Dropped: " << frames_dropped <<
-			" Invalid: " << frames_incomplete <<
-			" Sent: " << frames_sent <<
-			std::endl;
+	std::cerr << "Frames: " << frames_captured <<
+		" Dropped: " << frames_dropped <<
+		" Invalid: " << frames_incomplete <<
+		" Sent: " << frames_sent <<
+		std::endl;
 
-	return 0;
+	return main_result;
 }
