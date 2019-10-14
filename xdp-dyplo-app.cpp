@@ -80,22 +80,59 @@ int main(int argc, char** argv)
 			from_camera.enqueue(block);
 		}
 
+		/* Non-blocking IO */
+		from_camera.fcntl_set_flag(O_NONBLOCK);
+
 		for (;;)
 		{
-			dyplo::HardwareDMAFifo::Block *block;
+			dyplo::HardwareDMAFifo::Block *block = NULL;
 			/* Fetch the frame */
 			for(;;)
 			{
-				block = from_camera.dequeue();
+				dyplo::HardwareDMAFifo::Block *nextblock = from_camera.dequeue();
+				if (nextblock == NULL)
+				{
+					//std::cerr << "dequeue NULL\n";
+					/* Would block */
+					if (block)
+						break; /* Got a frame */
+					/* No frame, must wait */
+					std::cerr << "Frames: " << frames_captured <<
+						" Invalid: " << frames_incomplete <<
+						" Sent: " << frames_sent <<
+						std::endl;
+					from_camera.poll_for_incoming_data(1);
+					continue;
+				}
+				//std::cerr << "dequeue " << nextblock->id << '\n';
+
+				if (block)
+				{
+					//std::cerr << "enqueue o " << block->id << '\n';
+					block->bytes_used = video_size_bytes;
+					from_camera.enqueue(block);
+					block = NULL;
+				}
+
 				++frames_captured;
-				if (block->bytes_used == video_size_bytes)
-					break;
-				/* Drop frame if it's incomplete */
-				++frames_incomplete;
+				if (nextblock->bytes_used != video_size_bytes)
+				{
+					//std::cerr << "enqueue i " << nextblock->id << '\n';
+					nextblock->bytes_used = video_size_bytes;
+					from_camera.enqueue(nextblock);
+					++frames_incomplete;
+					continue;
+				}
+
+				/* Candidate arrived: A full frame, see if there are more... */
+				block = nextblock;
 			}
 
+			++frames_sent;
 			memcpy(fb, block->data, video_size_bytes);
 
+			//std::cerr << "enqueue s " << block->id << '\n';
+			block->bytes_used = video_size_bytes;
 			from_camera.enqueue(block);
 		}
 	}
