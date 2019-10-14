@@ -34,6 +34,11 @@ static void fcntl_set_flag(int handle, long flag)
 
 int main(int argc, char** argv)
 {
+	unsigned int frames_captured = 0;
+	unsigned int frames_sent = 0;
+	unsigned int frames_dropped = 0;
+	unsigned int frames_incomplete = 0;
+
 	try
 	{
 		// Create objects for hardware control
@@ -68,11 +73,6 @@ int main(int argc, char** argv)
 		fd_set *active_wfds;
 		int nfds;
 		int output_fd = 1; /* stdout */
-
-		unsigned int frames_captured = 0;
-		unsigned int frames_sent = 0;
-		unsigned int frames_dropped = 0;
-		unsigned int frames_incomplete = 0;
 
 		/* Activate non-blocking IO on the output */
 		fcntl_set_flag(output_fd, O_NONBLOCK);
@@ -153,18 +153,18 @@ int main(int argc, char** argv)
 				}
 			}
 		}
-
-		std::cerr << "Frames: " << frames_captured <<
-			" Dropped: " << frames_dropped <<
-			" Invalid: " << frames_incomplete <<
-			" Sent: " << frames_sent <<
-			std::endl;
 	}
 	catch (const std::exception& ex)
 	{
 		std::cerr << "ERROR:\n" << ex.what() << std::endl;
 		return 1;
 	}
+
+		std::cerr << "Frames: " << frames_captured <<
+			" Dropped: " << frames_dropped <<
+			" Invalid: " << frames_incomplete <<
+			" Sent: " << frames_sent <<
+			std::endl;
 
 	return 0;
 }
