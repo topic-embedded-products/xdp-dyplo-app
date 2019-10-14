@@ -11,8 +11,10 @@
  * isn't keeping up.
  */
 #include "dyplo/hardware.hpp"
+#include <sys/mman.h>
 #include <sys/select.h>
 #include <unistd.h>
+#include <string.h>
 #include <string>
 #include <iostream>
 
@@ -23,7 +25,7 @@ static const unsigned int video_size_pixels = 1920 * 1080;
 static const unsigned int video_bytes_per_pixel = 4; /* RGBX */
 static const unsigned int video_size_bytes = video_size_pixels * video_bytes_per_pixel;
 
-static void fcntl_set_flag(int handle, long flag)
+static inline void fcntl_set_flag(int handle, long flag)
 {
 	int flags = ::fcntl(handle, F_GETFL, 0);
 	if (flags < 0)
@@ -31,6 +33,15 @@ static void fcntl_set_flag(int handle, long flag)
 	if (::fcntl(handle, F_SETFL, flags | flag) < 0)
 		throw dyplo::IOException();
 }
+
+static void* mmap_file(int handle, int prot, off_t offset, size_t size)
+{
+	void* map = ::mmap(NULL, size, prot, MAP_SHARED, handle, offset);
+	if (map == MAP_FAILED)
+		throw dyplo::IOException("mmap");
+	return map;
+}
+
 
 int main(int argc, char** argv)
 {
@@ -42,6 +53,9 @@ int main(int argc, char** argv)
 
 	try
 	{
+		dyplo::File framebuffer(::open("/dev/fb0", O_RDWR));
+		void *fb = mmap_file(framebuffer.handle, PROT_READ | PROT_WRITE, 0, video_size_bytes);
+
 		// Create objects for hardware control
 		dyplo::HardwareContext hardware;
 		dyplo::HardwareControl hwControl(hardware);
@@ -54,7 +68,7 @@ int main(int argc, char** argv)
 		 * will allocate them for us in DMA capable memory, and give us
 		 * direct access through a memory map. The library does all the
 		 * work for us. */
-		static const unsigned int num_blocks = 3;
+		static const unsigned int num_blocks = 8;
 		from_camera.reconfigure(dyplo::HardwareDMAFifo::MODE_COHERENT, video_size_bytes, num_blocks, true);
 
 		/* Prime the reader with empty blocks. Just dequeue all blocks
@@ -66,93 +80,23 @@ int main(int argc, char** argv)
 			from_camera.enqueue(block);
 		}
 
-		dyplo::HardwareDMAFifo::Block *current_frame = NULL;
-		unsigned int current_frame_bytes_left = 0;
-		const char *current_frame_data = NULL;
-		fd_set rfds;
-		fd_set wfds;
-		fd_set *active_wfds;
-		int nfds;
-		int output_fd = 1; /* stdout */
-
-		/* Activate non-blocking IO on the output */
-		fcntl_set_flag(output_fd, O_NONBLOCK);
-
 		for (;;)
 		{
-			FD_ZERO(&rfds);
-			FD_SET(from_camera.handle, &rfds);
-			nfds = from_camera.handle + 1;
-			if (current_frame)
+			dyplo::HardwareDMAFifo::Block *block;
+			/* Fetch the frame */
+			for(;;)
 			{
-				/* We're busy sending stuff to output */
-				FD_ZERO(&wfds);
-				FD_SET(output_fd, &wfds);
-				if (output_fd >= nfds)
-					nfds = output_fd + 1;
-				active_wfds = &wfds;
-			}
-			else
-			{
-				active_wfds = NULL;
-			}
-
-			int ret = select(nfds, &rfds, active_wfds, NULL, NULL);
-			if (ret < 0)
-				throw dyplo::IOException("select()");
-
-			if (FD_ISSET(from_camera.handle, &rfds))
-			{
-				/* Fetch the frame */
-				dyplo::HardwareDMAFifo::Block *block = from_camera.dequeue();
+				block = from_camera.dequeue();
 				++frames_captured;
-				/* Drop frame if sending or it it's incomplete */
-				if (current_frame || (block->bytes_used != video_size_bytes))
-				{
-					block->bytes_used = video_size_bytes;
-					from_camera.enqueue(block);
-					if (current_frame)
-						++frames_dropped;
-					else
-						++frames_incomplete;
-				}
-				else
-				{
-					current_frame = block;
-					current_frame_data = (const char*)current_frame->data;
-					current_frame_bytes_left = current_frame->bytes_used;
-				}
+				if (block->bytes_used == video_size_bytes)
+					break;
+				/* Drop frame if it's incomplete */
+				++frames_incomplete;
 			}
 
-			if (active_wfds && FD_ISSET(output_fd, active_wfds))
-			{
-				if (!current_frame)
-					continue; /* Just to be safe */
+			memcpy(fb, block->data, video_size_bytes);
 
-				ssize_t r = ::write(output_fd, current_frame_data, current_frame_bytes_left);
-				if (r <= 0)
-				{
-					if (r == 0)
-						break; /* EOF */
-					if (errno == EAGAIN || errno == EWOULDBLOCK)
-						continue; /* Try again later */
-					else
-						throw dyplo::IOException("output");
-				}
-				else
-				{
-					current_frame_bytes_left -= r;
-					current_frame_data += r;
-				}
-
-				if (current_frame_bytes_left == 0)
-				{
-					++frames_sent;
-					current_frame->bytes_used = video_size_bytes;
-					from_camera.enqueue(current_frame);
-					current_frame = NULL;
-				}
-			}
+			from_camera.enqueue(block);
 		}
 	}
 	catch (const std::exception& ex)
