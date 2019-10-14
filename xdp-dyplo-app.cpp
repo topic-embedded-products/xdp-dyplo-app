@@ -16,8 +16,8 @@
 #include <string>
 #include <iostream>
 
-#define DYPLO_NODE_CAMERA_0	2
-#define DYPLO_NODE_CAMERA_1	3
+#define DYPLO_NODE_CAMERA_0	0
+//#define DYPLO_NODE_CAMERA_1	3
 
 static const unsigned int video_size_pixels = 1920 * 1080;
 static const unsigned int video_bytes_per_pixel = 4; /* RGBX */
