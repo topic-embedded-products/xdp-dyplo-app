@@ -17,6 +17,7 @@
 #include <string.h>
 #include <string>
 #include <iostream>
+#include <deque>
 
 #define DYPLO_NODE_CAMERA_0	0
 //#define DYPLO_NODE_CAMERA_1	3
@@ -149,6 +150,7 @@ int main(int argc, char** argv)
 		}
 
 		const unsigned int video_size_bytes = video_width * video_height * video_bytes_per_pixel;
+		unsigned int block_size_bytes = video_size_bytes;
 
 		int framebuffer_fd;
 		if (mmap_framebuffer)
@@ -179,56 +181,112 @@ int main(int argc, char** argv)
 		 * direct access through a memory map. The library does all the
 		 * work for us. */
 		static const unsigned int num_blocks = 8;
-		from_camera.reconfigure(
-			streaming ? dyplo::HardwareDMAFifo::MODE_STREAMING : dyplo::HardwareDMAFifo::MODE_COHERENT,
-			video_size_bytes, num_blocks, true);
+		/* Streaming mode can only handle 4M per frame, so split into
+		 * multiple smaller blocks if the frame size is larger */
+		unsigned int blocks_per_frame = 1;
+		if (streaming) {
+			blocks_per_frame = 1 + (video_size_bytes >> 22);
+			block_size_bytes = video_size_bytes / blocks_per_frame;
+			from_camera.reconfigure(
+				dyplo::HardwareDMAFifo::MODE_STREAMING,
+				block_size_bytes, num_blocks, true);
+		} else {
+			from_camera.reconfigure(
+				dyplo::HardwareDMAFifo::MODE_COHERENT,
+				block_size_bytes, num_blocks, true);
+		}
 
 		/* Prime the reader with empty blocks. Just dequeue all blocks
 		 * and enqueue them. */
 		for (unsigned int i = 0; i < num_blocks; ++i)
 		{
 			dyplo::HardwareDMAFifo::Block *block = from_camera.dequeue();
-			block->bytes_used = video_size_bytes;
+			block->bytes_used = block_size_bytes;
 			from_camera.enqueue(block);
 		}
 
 		/* Non-blocking IO */
 		// from_camera.fcntl_set_flag(O_NONBLOCK);
-		
+		if (verbose)
+			std::cerr << "Block: " << blocks_per_frame << " x " << block_size_bytes << std::endl;
+
 		Stopwatch s;
 
 		for (;;)
 		{
+			/* Throw away blocks.
+			 * TODO: maybe (skip_frames * blocks_per_frame)? */
 			for (int i = 0; i < skip_frames; ++i)
 			{
 				dyplo::HardwareDMAFifo::Block *block = from_camera.dequeue();
 				++frames_captured;
-				if (block->bytes_used != video_size_bytes)
+				if (verbose)
+					std::cerr << "skip " << block->user_signal << ": " << block->bytes_used << '\n';
+				if (block->bytes_used != block_size_bytes)
 					++frames_incomplete;
-				block->bytes_used = video_size_bytes;
+				block->bytes_used = block_size_bytes;
 				from_camera.enqueue(block);
 			}
 
+			/* Assemble a full frame, may be multiple blocks */
 			{
-				dyplo::HardwareDMAFifo::Block *block;
-				block = from_camera.dequeue();
-				++frames_captured;
-				if (block->bytes_used == video_size_bytes)
+				std::deque<dyplo::HardwareDMAFifo::Block *> blocks;
+				for (;;)
 				{
-					++frames_sent;
-					s.start();
-					if (fb)
-						memcpy(fb, block->data, video_size_bytes);
-					else
-						framebuffer.write(block->data, video_size_bytes);
-					s.stop();
+					dyplo::HardwareDMAFifo::Block *block;
+					block = from_camera.dequeue();
 					if (verbose)
-						std::cerr << "memcpy: " << s.elapsed_us() << '\n';
+						std::cerr << "acq " << block->user_signal << ": " << block->bytes_used << std::endl;
+					blocks.push_back(block);
+					++frames_captured;
+					/* Incomplete block? Throw everything away */
+					if (block->bytes_used != block_size_bytes) {
+						if (verbose)
+							std::cerr << "incomplete" << std::endl;
+						while (!blocks.empty()) {
+							dyplo::HardwareDMAFifo::Block *b = blocks.front();
+							b->bytes_used = block_size_bytes;
+							from_camera.enqueue(b);
+							blocks.pop_front();
+						}
+						continue; /* Try again */
+					}
+					if (verbose) std::cerr << "framing " << blocks.size() << std::endl;
+					/* throw away blocks from a different frame */
+					uint16_t frame_id = block->user_signal;
+					while (blocks.front()->user_signal != frame_id) {
+							dyplo::HardwareDMAFifo::Block *b = blocks.front();
+							if (verbose)
+								std::cerr << "drop " << b->user_signal << std::endl;
+							b->bytes_used = block_size_bytes;
+							from_camera.enqueue(b);
+							blocks.pop_front();
+					}
+					if (verbose) std::cerr << "sending" << std::endl;
+					/* See if we've assembled enough blocks for a frame */
+					if (blocks.size() == blocks_per_frame) {
+						off_t offset = 0;
+						while (!blocks.empty()) {
+							dyplo::HardwareDMAFifo::Block *b = blocks.front();
+							++frames_sent;
+							if (verbose)
+								std::cerr << "send @" << offset << " id=" << b->user_signal << std::endl;
+							s.start();
+							if (fb) {
+								memcpy((char *)fb + offset, b->data, block_size_bytes);
+								offset += block_size_bytes;
+							} else
+								framebuffer.write(b->data, block_size_bytes);
+							s.stop();
+							if (verbose)
+								std::cerr << "memcpy: " << s.elapsed_us() << '\n';
+							b->bytes_used = block_size_bytes;
+							from_camera.enqueue(b);
+							blocks.pop_front();
+						}
+						break; /* Done! */
+					}
 				}
-				else
-					++frames_incomplete;
-				block->bytes_used = video_size_bytes;
-				from_camera.enqueue(block);
 			}
 		}
 	}
