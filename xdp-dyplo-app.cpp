@@ -19,6 +19,8 @@
 #include <iostream>
 #include <deque>
 
+#include "stopwatch.hpp"
+
 #define DYPLO_NODE_CAMERA_0	0
 //#define DYPLO_NODE_CAMERA_1	3
 
@@ -33,41 +35,9 @@ static void usage(const char* name)
 		" -h    Frame height in lines, default: 1080\n"
 		" -b    Bits per pixel, default: 32\n"
 		" -v    Verbose mode, output stats\n"
-		" -k    Skip frames\n"
+		" -k    Skip frames before capturing a next frame, default: 0\n"
 		"\n";
 }
-
-
-#include <time.h>
-
-class Stopwatch
-{
-public:
-        struct timespec m_start;
-        struct timespec m_stop;
-
-        Stopwatch()
-        {
-                clock_gettime(CLOCK_MONOTONIC, &m_start);
-        }
-
-        void start()
-        {
-                clock_gettime(CLOCK_MONOTONIC, &m_start);
-        }
-
-        void stop()
-        {
-                clock_gettime(CLOCK_MONOTONIC, &m_stop);
-        }
-
-        unsigned int elapsed_us()
-        {
-                return
-                        ((m_stop.tv_sec - m_start.tv_sec) * 1000000) +
-                                (m_stop.tv_nsec - m_start.tv_nsec) / 1000;
-        }
-};
 
 static inline void fcntl_set_flag(int handle, long flag)
 {
@@ -104,7 +74,7 @@ int main(int argc, char** argv)
 		unsigned int video_width = 1920;
 		unsigned int video_height = 1080;
 		unsigned int video_bytes_per_pixel = 4; /* RGBX */
-		int skip_frames = 7;
+		int skip_frames = 0;
 
 
 		for (;;)
@@ -171,9 +141,11 @@ int main(int argc, char** argv)
 		// Create objects for hardware control
 		dyplo::HardwareContext hardware;
 		dyplo::HardwareControl hwControl(hardware);
+		// Claim camera node so other processes cannot access it
+		dyplo::HardwareConfig camera_cfg(hardware, camera_node);
 
 		/* Open the DMA channel */
-		dyplo::HardwareDMAFifo from_camera(hardware.openDMA(0, O_RDONLY));
+		dyplo::HardwareDMAFifo from_camera(hardware.openAvailableDMA(O_RDONLY));
 		from_camera.addRouteFrom(camera_node);
 
 		/* Allocate buffers, because of the zero-copy system, the driver
@@ -221,12 +193,12 @@ int main(int argc, char** argv)
 				dyplo::HardwareDMAFifo::Block *block = from_camera.dequeue();
 				++frames_captured;
 				if (verbose)
-					std::cerr << "skip @" << block->offset << ' ' << block->user_signal << ": " << block->bytes_used << '\n';
+					std::cerr << "<- skip @" << block->offset << ' ' << block->user_signal << ": " << block->bytes_used << '\n';
 				if (block->bytes_used != block_size_bytes)
 					++frames_incomplete;
 				block->bytes_used = block_size_bytes;
 				if (verbose)
-					std::cerr << "enqA @" << block->offset << '\n';
+					std::cerr << "-> enqA @" << block->offset << '\n';
 				from_camera.enqueue(block);
 			}
 
@@ -238,7 +210,7 @@ int main(int argc, char** argv)
 					dyplo::HardwareDMAFifo::Block *block;
 					block = from_camera.dequeue();
 					if (verbose)
-						std::cerr << "DEQU @" << block->offset << ' ' << block->user_signal << ": " << block->bytes_used  << '\n';
+						std::cerr << "<- DEQU @" << block->offset << ' ' << block->user_signal << ": " << block->bytes_used  << '\n';
 					blocks.push_back(block);
 					++frames_captured;
 					/* Incomplete block? Throw everything away */
@@ -249,7 +221,7 @@ int main(int argc, char** argv)
 							dyplo::HardwareDMAFifo::Block *b = blocks.front();
 							b->bytes_used = block_size_bytes;
 							if (verbose)
-								std::cerr << "enqB @" << b->offset << '\n';
+								std::cerr << "-> enqB @" << b->offset << '\n';
 							from_camera.enqueue(b);
 							blocks.pop_front();
 						}
@@ -264,11 +236,10 @@ int main(int argc, char** argv)
 								std::cerr << "drop " << b->user_signal << '\n';
 							b->bytes_used = block_size_bytes;
 							if (verbose)
-								std::cerr << "enqC @" << b->offset << '\n';
+								std::cerr << "-> enqC @" << b->offset << '\n';
 							from_camera.enqueue(b);
 							blocks.pop_front();
 					}
-					if (verbose) std::cerr << "sending\n";
 					/* See if we've assembled enough blocks for a frame */
 					if (blocks.size() == blocks_per_frame) {
 						off_t offset = 0;
@@ -288,7 +259,7 @@ int main(int argc, char** argv)
 								std::cerr << "memcpy: " << s.elapsed_us() << '\n';
 							b->bytes_used = block_size_bytes;
 							if (verbose)
-								std::cerr << "enqD @" << b->offset << '\n';
+								std::cerr << "-> enqD @" << b->offset << '\n';
 							from_camera.enqueue(b);
 							blocks.pop_front();
 						}
@@ -300,7 +271,7 @@ int main(int argc, char** argv)
 					dyplo::HardwareDMAFifo::Block *b = blocks.front();
 					b->bytes_used = block_size_bytes;
 					if (verbose)
-						std::cerr << "enqE @" << b->offset << '\n';
+						std::cerr << "-> enqE @" << b->offset << '\n';
 					from_camera.enqueue(b);
 					blocks.pop_front();
 				}

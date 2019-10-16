@@ -16,6 +16,8 @@
 #include <string>
 #include <iostream>
 
+#include "stopwatch.hpp"
+
 static void usage(const char* name)
 {
 	std::cerr << "usage: " << name << " [-d destination] [-v] [-s] [-w width] [-h height] [-b bpp]\n"
@@ -34,7 +36,7 @@ int main(int argc, char** argv)
 
 	try
 	{
-		int dma_index = 0;
+		int dma_index = -1;
 		bool verbose = false;
 		unsigned int video_width = 1920;
 		unsigned int video_height = 1080;
@@ -75,7 +77,12 @@ int main(int argc, char** argv)
 		dyplo::HardwareControl hwControl(hardware);
 
 		/* Open the DMA channel */
-		dyplo::HardwareDMAFifo camera(hardware.openDMA(dma_index, O_RDWR));
+		int fd;
+		if (dma_index < 0)
+			fd = hardware.openAvailableDMA(O_RDWR);
+		else
+			fd = hardware.openDMA(dma_index, O_RDWR);
+		dyplo::HardwareDMAFifo camera(fd);
 
 		/* Allocate zero-copy buffers */
 		static const unsigned int num_blocks = 8;
@@ -111,12 +118,24 @@ int main(int argc, char** argv)
 			camera.enqueue(block);
 		}
 
+		Stopwatch stopwatch;
+		unsigned int framecount = 0;
+
 		for (;;)
 		{
 			dyplo::HardwareDMAFifo::Block *block = camera.dequeue();
 			block->bytes_used = video_size_bytes;
 			camera.enqueue(block);
+			++framecount;
 			if (verbose) std::cerr << '.' << std::flush;
+			stopwatch.stop();
+			unsigned int elapsed_us = stopwatch.elapsed_us();
+			if (elapsed_us > 1000000) {
+				unsigned int fps = (framecount * 1000000) / elapsed_us;
+				std::cerr << '\r' << fps << " fps  " << std::flush;
+				stopwatch.start();
+				framecount = 0;
+			}
 		}
 	}
 	catch (const std::exception& ex)
