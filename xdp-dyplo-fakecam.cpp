@@ -99,9 +99,9 @@ int main(int argc, char** argv)
 					fb += video_bytes_per_pixel;
 				}
 			}
-			for (unsigned int h = 0; h < 16; ++h) {
+			for (unsigned int h = 0; h < 32; ++h) {
 				fb = (unsigned char *)block->data + ((i * 32) + (h * video_width)) * video_bytes_per_pixel ;
-				for (unsigned int w = 0; w < 16; ++w) {
+				for (unsigned int w = 0; w < 32; ++w) {
 					fb[0] = 0xff;
 					fb[1] = 0xff;
 					fb[2] = 0xff;
