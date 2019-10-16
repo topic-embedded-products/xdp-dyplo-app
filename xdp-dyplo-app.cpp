@@ -221,10 +221,12 @@ int main(int argc, char** argv)
 				dyplo::HardwareDMAFifo::Block *block = from_camera.dequeue();
 				++frames_captured;
 				if (verbose)
-					std::cerr << "skip " << block->user_signal << ": " << block->bytes_used << '\n';
+					std::cerr << "skip @" << block->offset << ' ' << block->user_signal << ": " << block->bytes_used << '\n';
 				if (block->bytes_used != block_size_bytes)
 					++frames_incomplete;
 				block->bytes_used = block_size_bytes;
+				if (verbose)
+					std::cerr << "enqA @" << block->offset << '\n';
 				from_camera.enqueue(block);
 			}
 
@@ -236,33 +238,37 @@ int main(int argc, char** argv)
 					dyplo::HardwareDMAFifo::Block *block;
 					block = from_camera.dequeue();
 					if (verbose)
-						std::cerr << "acq " << block->user_signal << ": " << block->bytes_used << std::endl;
+						std::cerr << "DEQU @" << block->offset << ' ' << block->user_signal << ": " << block->bytes_used  << '\n';
 					blocks.push_back(block);
 					++frames_captured;
 					/* Incomplete block? Throw everything away */
 					if (block->bytes_used != block_size_bytes) {
 						if (verbose)
-							std::cerr << "incomplete" << std::endl;
+							std::cerr << "incomplete\n";
 						while (!blocks.empty()) {
 							dyplo::HardwareDMAFifo::Block *b = blocks.front();
 							b->bytes_used = block_size_bytes;
+							if (verbose)
+								std::cerr << "enqB @" << b->offset << '\n';
 							from_camera.enqueue(b);
 							blocks.pop_front();
 						}
 						continue; /* Try again */
 					}
-					if (verbose) std::cerr << "framing " << blocks.size() << std::endl;
+					if (verbose) std::cerr << "framing " << blocks.size() << '\n';
 					/* throw away blocks from a different frame */
 					uint16_t frame_id = block->user_signal;
 					while (blocks.front()->user_signal != frame_id) {
 							dyplo::HardwareDMAFifo::Block *b = blocks.front();
 							if (verbose)
-								std::cerr << "drop " << b->user_signal << std::endl;
+								std::cerr << "drop " << b->user_signal << '\n';
 							b->bytes_used = block_size_bytes;
+							if (verbose)
+								std::cerr << "enqC @" << b->offset << '\n';
 							from_camera.enqueue(b);
 							blocks.pop_front();
 					}
-					if (verbose) std::cerr << "sending" << std::endl;
+					if (verbose) std::cerr << "sending\n";
 					/* See if we've assembled enough blocks for a frame */
 					if (blocks.size() == blocks_per_frame) {
 						off_t offset = 0;
@@ -270,7 +276,7 @@ int main(int argc, char** argv)
 							dyplo::HardwareDMAFifo::Block *b = blocks.front();
 							++frames_sent;
 							if (verbose)
-								std::cerr << "send @" << offset << " id=" << b->user_signal << std::endl;
+								std::cerr << "send @" << offset << " id=" << b->user_signal << '\n';
 							s.start();
 							if (fb) {
 								memcpy((char *)fb + offset, b->data, block_size_bytes);
@@ -281,6 +287,8 @@ int main(int argc, char** argv)
 							if (verbose)
 								std::cerr << "memcpy: " << s.elapsed_us() << '\n';
 							b->bytes_used = block_size_bytes;
+							if (verbose)
+								std::cerr << "enqD @" << b->offset << '\n';
 							from_camera.enqueue(b);
 							blocks.pop_front();
 						}
@@ -291,6 +299,8 @@ int main(int argc, char** argv)
 				while (!blocks.empty()) {
 					dyplo::HardwareDMAFifo::Block *b = blocks.front();
 					b->bytes_used = block_size_bytes;
+					if (verbose)
+						std::cerr << "enqE @" << b->offset << '\n';
 					from_camera.enqueue(b);
 					blocks.pop_front();
 				}
