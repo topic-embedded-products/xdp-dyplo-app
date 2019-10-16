@@ -287,6 +287,13 @@ int main(int argc, char** argv)
 						break; /* Done! */
 					}
 				}
+				/* Flush any remaining blocks */
+				while (!blocks.empty()) {
+					dyplo::HardwareDMAFifo::Block *b = blocks.front();
+					b->bytes_used = block_size_bytes;
+					from_camera.enqueue(b);
+					blocks.pop_front();
+				}
 			}
 		}
 	}
