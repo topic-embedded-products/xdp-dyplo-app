@@ -30,7 +30,7 @@ static void usage(const char* name)
 		" -c    Camera node index, default: 0\n"
 		" -d    Destination framebuffer (mmapped), default: /dev/fb0\n"
 		" -f    Output to file instead of memory mapped, - for stdout\n"
-		" -s    Streaming DMA mode (only if frame size less than 4MB)\n"
+		" -s    Streaming DMA mode (much faster on MPSoC)\n"
 		" -w    Frame width in pixels, default: 1920\n"
 		" -h    Frame height in lines, default: 1080\n"
 		" -b    Bits per pixel, default: 32\n"
@@ -152,7 +152,7 @@ int main(int argc, char** argv)
 		 * will allocate them for us in DMA capable memory, and give us
 		 * direct access through a memory map. The library does all the
 		 * work for us. */
-		static const unsigned int num_blocks = 8;
+		static const unsigned int num_blocks = 6;
 		/* Streaming mode can only handle 4M per frame, so split into
 		 * multiple smaller blocks if the frame size is larger */
 		unsigned int blocks_per_frame = 1;
