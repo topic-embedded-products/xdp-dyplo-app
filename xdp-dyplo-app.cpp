@@ -31,6 +31,7 @@ static void usage(const char* name)
 		" -d    Destination framebuffer (mmapped), default: /dev/fb0\n"
 		" -f    Output to file instead of memory mapped, - for stdout\n"
 		" -s    Streaming DMA mode (much faster on MPSoC)\n"
+		" -S    Force to use coherent DMA mode\n"
 		" -w    Frame width in pixels, default: 1920\n"
 		" -h    Frame height in lines, default: 1080\n"
 		" -b    Bits per pixel, default: 32\n"
@@ -69,7 +70,7 @@ int main(int argc, char** argv)
 		const char *fb_name = "/dev/fb0";
 		int camera_node = DYPLO_NODE_CAMERA_0;
 		bool verbose = false;
-		bool streaming = false;
+		bool streaming = true;
 		bool mmap_framebuffer = true;
 		unsigned int video_width = 1920;
 		unsigned int video_height = 1080;
@@ -79,7 +80,7 @@ int main(int argc, char** argv)
 
 		for (;;)
 		{
-			int c = getopt(argc, argv, "b:c:d:f:h:k:svw:");
+			int c = getopt(argc, argv, "b:c:d:f:h:k:sSvw:");
 			if (c < 0)
 				break;
 			switch (c)
@@ -106,6 +107,9 @@ int main(int argc, char** argv)
 				break;
 			case 's':
 				streaming = true;
+				break;
+			case 'S':
+				streaming = false;
 				break;
 			case 'v':
 				verbose = true;
