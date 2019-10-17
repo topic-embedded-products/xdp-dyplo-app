@@ -1,0 +1,67 @@
+Using xdp-dyplo-app on the board (pass "-?" to get available options).
+
+
+REAL Camera:
+
+xdp-dyplo-app
+
+With no arguments, captures camera frame and sends it to the (hdmi) framebuffer.
+Use the "-c" option to set the camera node index (defaults to 0).
+
+
+xdp-dyplo-app -f -
+
+Use "-f" to send output to a file. Using "-" as a filename results in output going to stdout. Don't run this on your terminal, but send it to some other program like gstreamer...
+
+
+
+FAKE camera:
+
+To use the "emulated" camera, tell xdp-dyplo-app to use camera input "5" (which is the first DMA node) and use xdp-dyplo-fakecam to provide images for that:
+
+xdp-dyplo-fakecam &
+xdp-dyplo-app -c 5 
+
+This would display the fake camera images on the monitor
+
+
+xdp-dyplo-fakecam continuously writes 8 different images (block in top left) to the DMA node
+
+
+
+Integrate with gstreamer:
+
+To have gstreamer use "stdin" as input, use "fdsrc" and "rawvideoparse" components. For example:
+
+xdp-dyplo-app -c 5 -f - -k 0 | \
+gst-launch-1.0 fdsrc fd=0 blocksize=8294400 ! \
+ rawvideoparse  width=1920 height=1080 format=rgbx ! videoconvert ! \
+ fbdevsink sync=false
+
+
+This displays video on the framebuffer.
+
+To stream to tcpserver, this might work:
+
+
+xdp-dyplo-app -c 3 -f - -k 0 | \
+gst-launch-1.0 fdsrc fd=0 blocksize=8294400 ! \
+ rawvideoparse  width=1920 height=1080 format=rgbx ! videoconvert ! \
+ theoraenc ! oggmux ! tcpserversink host=0.0.0.0 port=9991
+
+
+
+Scaling image (for web):
+
+The "fixed" node "2" is a scaler that drops every other pixel and line, hence reducing the image size by half in both directions. Pass the camera data through this node to get a scaled image. Tell xdp-dyplo-app with -w and -h the dimensions.
+
+Example setup that displays the scaled image on the framebuffer:
+
+xdp-dyplo-app -c 2 -s -w 960 -h 540 -f - | \
+  gst-launch-1.0 fdsrc fd=0 blocksize=2073600 do-timestamp=true ! \
+  rawvideoparse use-sink-caps=false width=960 height=540 format=rgbx framerate=60/1 ! \
+  videoconvert ! fbdevsink
+
+dyploroute 5,0-2,0
+xdp-dyplo-fakecam
+
