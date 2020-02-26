@@ -70,13 +70,12 @@ int main(int argc, char** argv)
 		const char *fb_name = "/dev/fb0";
 		int camera_node = DYPLO_NODE_CAMERA_0;
 		bool verbose = false;
-		bool streaming = true;
+		bool streaming = false;
 		bool mmap_framebuffer = true;
 		unsigned int video_width = 1920;
 		unsigned int video_height = 1080;
 		unsigned int video_bytes_per_pixel = 4; /* RGBX */
 		int skip_frames = 0;
-
 
 		for (;;)
 		{
@@ -134,6 +133,8 @@ int main(int argc, char** argv)
 				framebuffer_fd = 1; /* Causes stdout to be closed later, but we don't care */
 			else
 				framebuffer_fd = ::open(fb_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (framebuffer_fd == -1)
+			throw dyplo::IOException(fb_name);
 		dyplo::File framebuffer(framebuffer_fd);
 		
 		void *fb;
@@ -145,8 +146,6 @@ int main(int argc, char** argv)
 		// Create objects for hardware control
 		dyplo::HardwareContext hardware;
 		dyplo::HardwareControl hwControl(hardware);
-		// Claim camera node so other processes cannot access it
-		dyplo::HardwareConfig camera_cfg(hardware, camera_node);
 
 		/* Open the DMA channel */
 		dyplo::HardwareDMAFifo from_camera(hardware.openAvailableDMA(O_RDONLY));
